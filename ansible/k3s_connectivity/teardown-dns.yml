@@ -1,0 +1,59 @@
+
+- name: Remove Ex.DNS
+  hosts: k3s_server
+  gather_facts: false
+
+  vars:
+    dns_server: "{{ lookup('env', 'TSIG_UPDATE_SERVER') }}"
+    tsig_key_name: "{{ lookup('env', 'TSIG_KEY_NAME') }}" 
+    tsig_algorithm: "{{ lookup('env', 'TSIG_ALGORITHM') }}"
+    tsig_secret: "{{ lookup('env', 'TSIG_SECRET') }}" 
+    dns_zone: group-4.doe25.chas-lab.dev 
+    managed_hosts: 
+      - web-axel
+
+  tasks:
+
+    - name: Check Python
+      ansible.builtin.apt:
+        name: python3-dnspython
+        state: present
+        update_cache: true
+      become: true
+
+    - name: Halt DNS
+      kubernetes.core.k8s_scale:
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
+        api_version: apps/v1
+        kind: Deployment
+        namespace: external-dns
+        name: external-dns
+        replicas: 0
+        wait: true
+      become: true
+
+    - name: Delete A
+      community.general.nsupdate:
+        server: "{{ dns_server }}"
+        key_name: "{{ tsig_key_name }}"
+        key_algorithm: "{{ tsig_algorithm }}"
+        key_secret: "{{ tsig_secret }}"
+        zone: "{{ dns_zone }}"
+        record: "{{ item }}"
+        type: A
+        state: absent
+      loop: "{{ managed_hosts }}"
+      no_log: true
+  
+    - name: Delete TXT ownership
+      community.general.nsupdate:
+        server: "{{ dns_server }}"
+        key_name: "{{ tsig_key_name }}"
+        key_algorithm: "{{ tsig_algorithm }}"
+        key_secret: "{{ tsig_secret }}"
+        zone: "{{ dns_zone }}"
+        record: "a-{{ item }}"
+        type: TXT
+        state: absent
+      loop: "{{ managed_hosts }}"
+      no_log: true 

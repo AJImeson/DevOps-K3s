@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://grafana-community.github.io/helm-charts
+    chart: loki
+    targetRevision: 18.13.2
+    helm:
+      releaseName: loki
+      valuesObject:
+        loki:
+          auth_enabled: false
+          commonConfig:
+            replication_factor: 1
+          storage:
+            type: filesystem
+          useTestSchema: true
+        singleBinary:
+          replicas: 1
+        backend:
+          replicas: 0
+        read:
+          replicas: 0
+        write:
+          replicas: 0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: loki
+  syncPolicy:
+    automated: {}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

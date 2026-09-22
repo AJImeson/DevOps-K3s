@@ -1,0 +1,17 @@
+prefix: "axel"
+replicas: 3
+image: nginx
+tag: "1.27-alpine"
+service:
+  enabled: true
+env:
+  - name: LOG_LEVEL
+    value: debug
+  - name: Region
+    value: eu-north
+page:
+  title: "Grupp4"
+  body: "You've been Torvaldified"
+ingress:
+  host: web-axel.group-4.doe25.chas-lab.dev
+  clusterIssuer: letsencrypt-prod

@@ -1,0 +1,18 @@
+[k3s_server]
+${server_ip} node_private_ip=${server_private_ip}
+
+[k3s_agents]
+%{ for i, ip in agent_ips ~}
+${ip} node_private_ip=${agent_private_ips[i]}
+%{ endfor ~}
+
+[k3s:children]
+k3s_server
+k3s_agents
+
+[k3s:vars]
+ansible_user=${admin_user}
+ansible_port=2522
+ansible_python_interpreter=/usr/bin/python3
+server_private_ip=${server_private_ip}
+k3s_token=${k3s_token}

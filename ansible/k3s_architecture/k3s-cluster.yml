@@ -1,0 +1,108 @@
+---
+- name: K3sTest
+  hosts: k3s_server
+  become: true
+  tasks:
+    - name: SSH Pause
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+    - name: Private IP Pause
+      ansible.builtin.command: "ip -4 addr show"
+      register: privip
+      until: node_private_ip in privip.stdout
+      retries: 30
+      delay: 4
+      changed_when: false
+
+    - name: Private.N.I
+      ansible.builtin.shell: |
+        set -o pipefail
+        ip -o -4 addr show | awk -v ip="{{ node_private_ip }}" '$4 ~ "^"ip"/" {print $2; exit}'
+      args:
+        executable: /bin/bash
+      register: privif
+      changed_when: false
+      failed_when: privif.stdout == ""
+
+    - name: Server Install
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -sfL https://get.k3s.io | \
+           K3S_TOKEN="{{ k3s_token }}" \
+           INSTALL_K3S_EXEC="server \
+             --node-ip {{ node_private_ip }} \
+             --advertise-address {{ server_private_ip }} \
+             --flannel-iface {{ privif.stdout }} \
+             --tls-san {{ inventory_hostname }} \
+             --node-external-ip {{ inventory_hostname }} \
+             --write-kubeconfig-mode 644" sh -
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/k3s
+
+    - name: API pause
+      ansible.builtin.wait_for:
+        port: 6443
+        timeout: 180
+
+    - name: Helm Installation
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/helm
+
+    - name: Helm-K3s-Config
+      ansible.builtin.lineinfile:
+        path: "/home/{{ ansible_user }}/.bashrc"
+        line: "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml"
+        state: present
+
+- name: Agent Handshake
+  hosts: k3s_agents
+  become: true
+  tasks:
+    - name: SSH Pause
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+    - name: Private IP Pause
+      ansible.builtin.command: "ip -4 addr show"
+      register: privip
+      until: node_private_ip in privip.stdout
+      retries: 30
+      delay: 4
+      changed_when: false
+
+    - name: Private.N.I
+      ansible.builtin.shell: |
+        set -o pipefail
+        ip -o -4 addr show | awk -v ip="{{ node_private_ip }}" '$4 ~ "^"ip"/" {print $2; exit}'
+      args:
+        executable: /bin/bash
+      register: privif
+      changed_when: false
+      failed_when: privif.stdout == ""
+
+    - name: Install k3s agent
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -sfL https://get.k3s.io | \
+          K3S_URL="https://{{ server_private_ip }}:6443" \
+          K3S_TOKEN="{{ k3s_token }}" \
+          INSTALL_K3S_EXEC="agent \
+            --node-ip {{ node_private_ip }} \
+            --flannel-iface {{ privif.stdout }} \
+            --node-external-ip {{ inventory_hostname }}" sh -
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/k3s
+
+    - name: Label agents as workers
+      ansible.builtin.command:
+        cmd: >
+          k3s kubectl label node {{ hostvars[inventory_hostname]['ansible_hostname'] }}
+          node-role.kubernetes.io/worker=true --overwrite
+      delegate_to: "{{ groups['k3s_server'][0] }}"
+      changed_when: false

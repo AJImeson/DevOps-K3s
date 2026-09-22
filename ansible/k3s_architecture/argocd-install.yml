@@ -1,0 +1,58 @@
+---
+- name: ArgoCD
+  hosts: k3s_server
+  become: true
+  tasks:
+    - name: Kubernetes python module
+      ansible.builtin.apt:
+        name: python3-kubernetes
+        update_cache: true
+
+    - name: ArgoCD Installation
+      kubernetes.core.helm:
+        name: argocd
+        chart_ref: argo-cd
+        chart_repo_url: https://argoproj.github.io/argo-helm
+        release_namespace: argocd
+        create_namespace: true
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+    - name: Repository credentials
+      kubernetes.core.k8s:
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: repo-grupp4
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: git
+            url: https://git.chas-lab.dev/AJ.Imeson/grupp4-projekt_labb.git
+            username: gitlab+deploy-token-109
+            password: "{{ lookup('env', 'ARGOCD_DEPLOY_TOKEN') }}"
+
+    - name: Init App
+      kubernetes.core.k8s:
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
+        definition:
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: root
+            namespace: argocd
+          spec:
+            project: default
+            source:
+              repoURL: https://git.chas-lab.dev/AJ.Imeson/grupp4-projekt_labb.git
+              path: argocd/apps
+              targetRevision: Axel-Allmänt
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: argocd
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true

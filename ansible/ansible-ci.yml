@@ -1,0 +1,89 @@
+---
+.ansible:
+  image: python:3.12-slim
+  before_script:
+    - pip install --quiet ansible-core ansible-lint
+    - ansible-galaxy collection install -r ansible/requirements.yml
+
+ansible-syntax:
+  extends: .ansible
+  stage: configure
+  script:
+    - ansible-playbook ansible/k3s_architecture/k3s-cluster.yml --syntax-check
+    - ansible-playbook ansible/k3s_tools/environment-tool-install.yml --syntax-check
+    - ansible-playbook ansible/k3s_architecture/sealed-secrets.yml --syntax-check
+    - ansible-playbook ansible/k3s_connectivity/external-dns.yml --syntax-check
+    - ansible-playbook ansible/k3s_connectivity/cert-manager.yml --syntax-check
+    - ansible-playbook ansible/k3s_architecture/argocd-install.yml --syntax-check
+    - ansible-playbook ansible/k3s_connectivity/teardown-dns.yml --syntax-check
+  rules: !reference [.ansible-rules, rules]
+
+ansible-lint:
+  extends: .ansible
+  stage: configure
+  script:
+    - >
+      ansible-lint 
+      --exclude ansible/ansible-ci.yml 
+      --exclude terraform/terraform-ci.yml
+      --exclude charts/ 
+      ansible/
+  allow_failure: true
+  rules: !reference [.ansible-rules, rules]
+
+# Builds cluster first, installs tools/external-dns/cert-manager. Finishes with setting up ArgoCD for synchronising the entire build
+ansible-run:
+  extends: .ansible
+  stage: configure
+  needs: 
+    - job: terraform-apply
+      optional: true 
+    - job: ansible-lint
+      optional: true
+  variables:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+  before_script:
+    - pip install --quiet ansible-core
+    - ansible-galaxy collection install -r ansible/requirements.yml
+    - apt-get update && apt-get install -y --no-install-recommends openssh-client
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - echo "$SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
+    - chmod 600 ~/.ssh/id_ed25519
+    - export ANSIBLE_PRIVATE_KEY_FILE=~/.ssh/id_ed25519
+  script:
+    - ansible-playbook -i ansible/inventory.ini ansible/k3s_architecture/k3s-cluster.yml
+    - ansible-playbook -i ansible/inventory.ini ansible/k3s_tools/environment-tool-install.yml
+    - echo "KEY ${#SEALED_SECRETS_KEY_B64} CRT ${#SEALED_SECRETS_CRT_B64}"
+    - ansible-playbook -i ansible/inventory.ini ansible/k3s_architecture/sealed-secrets.yml
+    - ansible-playbook -i ansible/inventory.ini ansible/k3s_connectivity/external-dns.yml
+    - ansible-playbook -i ansible/inventory.ini ansible/k3s_connectivity/cert-manager.yml
+    - ansible-playbook -i ansible/inventory.ini ansible/k3s_architecture/argocd-install.yml
+  rules: !reference [.run-rules, rules]
+    
+ansible-teardown-dns:
+  extends: .ansible
+  stage: teardown
+  variables:
+    ANSIBLE_INVENTORY_UNPARSED_FAILED: "True"
+  needs:
+    - job: terraform-apply
+      optional: true
+  variables:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+  before_script:
+    - pip install --quiet ansible-core dnspython
+    - ansible-galaxy collection install -r ansible/requirements.yml
+    - apt-get update && apt-get install -y --no-install-recommends openssh-client
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - echo "$SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
+    - chmod 600 ~/.ssh/id_ed25519
+    - export ANSIBLE_PRIVATE_KEY_FILE=~/.ssh/id_ed25519
+  script:
+    - ansible-playbook -i ansible/inventory.ini ansible/k3s_connectivity/teardown-dns.yml
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_REF_NAME == "Axel-Allmänt"
+      when: manual
+      allow_failure: true 

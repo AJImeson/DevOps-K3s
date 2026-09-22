@@ -1,0 +1,62 @@
+.terraform:
+  image:
+    name: hashicorp/terraform:1.9
+    entrypoint: [""]
+  variables:
+    TF_STATE: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/k3s"
+    TF_HTTP_ADDRESS: "${TF_STATE}"
+    TF_HTTP_LOCK_ADDRESS: "${TF_STATE}/lock" 
+    TF_HTTP_UNLOCK_ADDRESS: "${TF_STATE}/lock"
+    TF_HTTP_LOCK_METHOD: POST
+    TF_HTTP_UNLOCK_METHOD: DELETE
+    TF_HTTP_USERNAME: gitlab-ci-token    
+    TF_HTTP_PASSWORD: "${CI_JOB_TOKEN}"
+
+  before_script:
+    - cd terraform/
+    - RUNNER_IP="$(wget -qO- https://ifconfig.me/ip)"
+    - test -n "$RUNNER_IP" || { echo "No egress IP resolved"; exit 1; }
+    - export TF_VAR_user_ip="[\"${RUNNER_IP}/32\"]"
+      #- export TF_VAR_user_ip="$(curl -s ifconfig.me)/32"
+    - terraform --version
+    - terraform init
+
+terraform-validate:
+  extends: .terraform
+  stage: validate
+  script:
+    - terraform validate
+    - terraform fmt -check=true
+  rules: !reference [.tf-rules, rules]
+
+terraform-plan:
+  extends: .terraform
+  stage: plan
+  script:
+    - terraform plan -input=false -out=tfplan
+  artifacts:
+    paths: [terraform/tfplan]
+  rules: !reference [.run-rules, rules]
+
+terraform-apply:
+  extends: .terraform
+  stage: apply
+  script:
+    - terraform apply -input=false tfplan
+  artifacts:
+    paths: [ansible/inventory.ini]
+    expire_in: 1 day
+  rules: !reference [.run-rules, rules]
+    
+terraform-destroy:
+  extends: .terraform
+  stage: destroy
+  needs: []
+  dependencies: []
+  script:
+    - terraform destroy -auto-approve -input=false
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      when: manual
+    - if: $CI_COMMIT_REF_NAME == "Axel-Allmänt"
+      when: manual

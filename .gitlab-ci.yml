@@ -1,0 +1,55 @@
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+stages:
+  - validate
+  - plan
+  - apply
+  - configure
+  - teardown
+  - destroy
+
+.tf-rules:
+  rules:
+    - if: $REBUILD == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: &tf_paths
+        - terraform/**/*
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      changes: *tf_paths
+    - if: $CI_COMMIT_REF_NAME == "Axel-Allmänt"
+      changes: *tf_paths
+    - when: never
+
+.ansible-rules:
+  rules:
+    - if: $REBUILD == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: &ansible_paths
+        - ansible/**/*
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      changes: *ansible_paths
+    - if: $CI_COMMIT_REF_NAME == "Axel-Allmänt"
+      changes: *ansible_paths
+    - when: never
+
+.run-rules:
+  rules:
+    - if: $REBUILD == "true"
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      changes: *tf_paths
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      changes: *ansible_paths
+    - if: $CI_COMMIT_REF_NAME == "Axel-Allmänt"
+      changes: *tf_paths
+    - if: $CI_COMMIT_REF_NAME == "Axel-Allmänt"
+      changes: *ansible_paths
+    - when: never
+
+include:
+  - local: '/terraform/terraform-ci.yml'
+  - local: '/ansible/ansible-ci.yml'

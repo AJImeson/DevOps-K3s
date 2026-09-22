@@ -1,0 +1,36 @@
+---
+## Tools for system ##
+
+- name: Shell Tooling
+  hosts: k3s_server:k3s_agents
+  become: true
+  tasks:
+    # Install packages
+    - name: Install Packages
+      ansible.builtin.apt:
+        name:
+          - bash-completion
+          - jq
+          - tree
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # Kubectl completion
+    - name: Kube-Complete
+      ansible.builtin.shell: |
+        set -o pipefail
+        k3s completion bash > /etc/bash_completion.d/k3s
+      args:
+        executable: /bin/bash
+        creates: /etc/bash_completion.d/k3s
+
+    - name: Kube alias_complete
+      ansible.builtin.blockinfile:
+        path: "/home/{{ ansible_user }}/.bashrc"
+        marker: "# {mark} k3s helpers"
+        block: |
+          alias k=kubectl
+          alias kubectl='k3s kubectl'
+          source <(k3s kubectl completion bash)
+          complete -o default -F __start_kubectl k

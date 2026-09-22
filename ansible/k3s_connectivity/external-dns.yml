@@ -1,0 +1,81 @@
+- name: External-DNS
+  hosts: k3s_server
+  become: true
+
+  vars:
+    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+    external_dns_namespace: external-dns
+    tsig_secret_name: external-dns-tsig 
+    dns_zone: group-4.doe25.chas-lab.dev
+
+# Gitlab variables
+    dns_update_server: "{{ lookup('ansible.builtin.env', 'TSIG_UPDATE_SERVER') }}"
+    tsig_key_name: "{{ lookup('ansible.builtin.env', 'TSIG_KEY_NAME') }}"
+    tsig_algorithm: "{{ lookup('ansible.builtin.env', 'TSIG_ALGORITHM') }}"
+    tsig_secret: "{{ lookup('ansible.builtin.env', 'TSIG_SECRET') }}"
+
+
+  tasks:
+    - name: Python3 kubernetes validation
+      ansible.builtin.apt:
+        name: python3-kubernetes
+        state: present
+        update_cache: true
+
+    - name: Namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: Namespace
+        name: "{{ external_dns_namespace }}"
+        state: present
+
+    - name: TSIG Secret
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ tsig_secret_name }}"
+            namespace: "{{ external_dns_namespace }}"
+          type: Opaque
+          stringData:
+            tsig-secret: "{{ tsig_secret }}"
+      no_log: true
+
+    - name: Install External-DNS
+      kubernetes.core.helm:
+        kubeconfig: "{{ kubeconfig_path }}"
+        name: external-dns
+        chart_ref: external-dns 
+        chart_repo_url: https://kubernetes-sigs.github.io/external-dns/
+        chart_version: 1.21.1
+        release_namespace: "{{ external_dns_namespace }}"
+        wait: true
+        values:
+          provider:
+            name: rfc2136
+          sources:
+            - ingress
+          domainFilters:
+            - "{{ dns_zone }}"
+          txtOwnerId: grupp4-axel
+          policy: sync
+          logLevel: debug
+
+          extraArgs:
+            - "--rfc2136-host={{ dns_update_server }}"
+            - "--rfc2136-port=53"
+            - "--rfc2136-zone={{ dns_zone }}"
+            - "--rfc2136-tsig-keyname={{ tsig_key_name }}"
+            - "--rfc2136-tsig-secret-alg={{ tsig_algorithm }}"
+
+          env:
+            - name: EXTERNAL_DNS_RFC2136_TSIG_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ tsig_secret_name }}"
+                  key: tsig-secret 
+
